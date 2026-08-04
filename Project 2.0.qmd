@@ -1,0 +1,603 @@
+---
+title: "PROJECT"
+author: "NITYA TANDON"
+format: 
+  pdf:
+    warning: false
+    message: false
+    toc: false
+    number-sections: false
+    geometry: margin=1in
+    fontsize: 11pt
+    linestretch: 2
+editor: visual
+---
+
+```{r}
+rm(list = ls())
+options(scipen = 20)
+```
+
+```{r}
+if (!require("jtools")) install.packages("jtools")
+library(jtools)
+if (!require("forcats")) install.packages("forcats")
+library(forcats)
+if (!require("tidyr")) install.packages("tidyr")
+library(tidyr)
+if (!require("dplyr")) install.packages("dplyr")
+library(dplyr)
+if (!require("expss")) install.packages("expss")
+library(expss)
+if (!require("stringr")) install.packages("stringr")
+library(stringr)
+if (!require("ggplot2")) install.packages("ggplot2")
+library(ggplot2)
+if (!require("sandwich")) install.packages("sandwich")
+library(sandwich)
+if (!require("lmtest")) install.packages("lmtest")
+library(lmtest)
+if (!require("huxtable")) install.packages("huxtable")
+library(huxtable)
+if (!require("AER")) install.packages("AER")
+library(AER)
+if (!require("plm")) install.packages("plm")
+library(plm)
+if (!require("car")) install.packages("car")
+library(car)
+if (!require("stargazer")) install.packages("stargazer")
+library(stargazer)
+if (!require("clubSandwich")) install.packages("clubSandwich")
+library(clubSandwich)
+if (!require("broom")) install.packages("broom")
+library(broom)
+
+```
+
+# LOADING AND CLEANING DATA:
+
+```{r}
+load("C:/Users/nitya/OneDrive/Desktop/PROJECT/nlsy97_long.Rda")
+names(nlsy97_long)
+```
+
+## Making Birth year and finding out age
+
+```{r}
+nlsy97_long$birthyr <- as.numeric(nlsy97_long$birthyr)
+nlsy97_long$year <- as.numeric(nlsy97_long$year)
+nlsy97_long$age <- nlsy97_long$year - nlsy97_long$birthyr
+
+summary(nlsy97_long$age)
+```
+
+## Creating the education variable and cleaning it and filled up
+
+```{r}
+nlsy97_long <- nlsy97_long %>% mutate(highested= case_when(
+  year == 1997 ~ highestgrade,
+  year >= 1998 & year <2010 ~ highested1,
+  year >= 2010 ~ highested2))
+
+summary(nlsy97_long$highested)
+
+nlsy97_long <- nlsy97_long %>% mutate(highested= case_when(
+  highested == 0 ~ NA,
+  highested == 95 ~ NA,
+  TRUE ~ highested))
+
+summary(nlsy97_long$highested)
+
+nlsy97_long <- nlsy97_long %>%
+  arrange(personid, year) %>% 
+  group_by(personid) %>%
+  fill(highested, .direction = "down") %>% 
+  ungroup()
+
+summary(nlsy97_long$highested)
+```
+
+## Taking out missing varibles
+
+```{r}
+nlsy97_cleaned <- nlsy97_long %>%
+  drop_na(highested) %>%
+  filter(year != 2012 & year != 2014 & year != 2016 &
+         year != 2018 & year != 2020 & year != 2022 & year != 2024)
+```
+
+## Table
+
+```{r}
+nlsy97_long %>% count(year)
+nlsy97_cleaned %>% count(year)
+
+aggregate(highested ~ age, data = nlsy97_cleaned, summary)
+
+cor(nlsy97_cleaned$age, nlsy97_cleaned$highested)
+```
+
+## Box plot
+
+```{r}
+plot1 <- ggplot(nlsy97_cleaned, aes(as.factor(age), highested)) + 
+  geom_boxplot(outliers = FALSE, fill = "white", colour = "#3366FF") +
+  xlab("age") +
+  ylab("Years of education obtained")
+
+print(plot1)
+```
+
+# CREATING VARIABLES FOR WAGE AND INCOME AS WELL AS CONTROL VARIABLES
+
+## Focusing on worker and hours worked, etc, with only looking at employeed workers with income and then creating a work income. Then calculating work income, wage and log wage
+
+```{r}
+nlsy97_cleaned <- nlsy97_cleaned %>% select(year, personid, workinc2, emphours, hadinc, workinc_est, everything()) 
+
+nlsy97_cleaned <- subset(nlsy97_cleaned, hadinc==1 & !is.na(emphours) & emphours>0)
+
+nlsy97_cleaned <- nlsy97_cleaned %>% mutate(workinc= case_when(
+  workinc_est==1 ~ 2500,
+  workinc_est==2 ~ 7500,
+  workinc_est==3 ~ 17500,
+  workinc_est==4 ~ 37500,
+  workinc_est==5 ~ 75000,
+  workinc_est==6 ~ 150000,
+  workinc_est==7 ~ 300000,  
+  TRUE ~ workinc2))
+
+nlsy97_cleaned$wage <- nlsy97_cleaned$workinc/nlsy97_cleaned$emphours
+
+nlsy97_cleaned <- nlsy97_cleaned %>% select(year, personid, wage, workinc, emphours, everything())
+
+nlsy97_cleaned <- subset(nlsy97_cleaned, wage>0 & !is.na(wage)) 
+
+nlsy97_cleaned$lnwage <- log(nlsy97_cleaned$wage)
+
+nlsy97_cleaned <- nlsy97_cleaned %>% select(year, personid, lnwage, everything()) 
+
+summary(nlsy97_cleaned$workinc)
+summary(nlsy97_cleaned$wage)
+summary(nlsy97_cleaned$lnwage)
+```
+
+## control variables = age square and age cube
+
+```{r}
+nlsy97_cleaned$agesq <- nlsy97_cleaned$age^2
+nlsy97_cleaned$agecu <- nlsy97_cleaned$age^3
+
+summary(nlsy97_cleaned$agesq)
+summary(nlsy97_cleaned$agecu)
+```
+
+## Control variables = calculating tenure
+
+```{r}
+nlsy97_cleaned$tenure <- nlsy97_cleaned$tenure / 52
+summary(nlsy97_cleaned$tenure)
+```
+
+## Control variable = Female variable
+
+```{r}
+nlsy97_cleaned$female <- as.numeric(nlsy97_cleaned$sex) - 1
+summary(nlsy97_cleaned$female)
+```
+
+## Control ASVAB
+
+```{r}
+nlsy97_cleaned$asvab <- as.numeric(nlsy97_cleaned$asvab) / 1000
+summary(nlsy97_cleaned$asvab)
+```
+
+## Non student age restriction
+
+```{r}
+ nlsy97_cleaned <- nlsy97_cleaned %>% mutate(student= case_when(
+  year == 1997 ~ student2,
+  year >= 1998 & year <2005 ~ student1,
+  year >= 2005 ~ student2))
+
+nlsy_agerestric <- subset(nlsy97_cleaned, student < 8 & age >= 30)
+
+nlsy_agerestric$experience_l <- nlsy_agerestric$age - nlsy_agerestric$highested - 6
+
+summary(nlsy_agerestric$experience_l)
+```
+
+# REGRESSION 1: the baseline regression
+
+```{r}
+reg1 <- lm(
+  lnwage ~ highested + age + agesq + agecu + union + tenure + female + as.factor(year),
+  data = nlsy_agerestric
+)
+
+summary(reg1)
+
+reg1a <- coeftest(reg1, vcov = vcovHC, type = "HC0")
+reg1b <- coeftest(reg1, vcov = vcovCL, type = "HC0", cluster = ~personid)
+
+export_summs(
+  reg1, reg1a, reg1b,
+  model.names = c("Basic", "Robust SE", "Clustered SE"),
+  digits = 4,
+  coefs = c("highested", "age", "agesq", "agecu", "union", "tenure", "female")
+)
+```
+
+# REGRESSION 2: the baseline regression with asvab as a control
+
+```{r}
+reg2 <- lm(
+  lnwage ~ highested + asvab + age + agesq + agecu + union + tenure + female + as.factor(year),
+  data = nlsy_agerestric
+)
+
+summary(reg2)
+
+reg2a <- coeftest(reg2, vcov = vcovCL, type = "HC0", cluster = ~personid)
+
+export_summs(
+  reg1b, reg2a,
+  model.names = c("Education", "+ASVAB"),
+  digits = 4,
+  coefs = c("highested", "asvab", "age", "agesq", "agecu", "union", "tenure", "female")
+)
+```
+
+# LOADING AND CLEANING FIELD OF STUDY
+
+## Adding the college majors
+
+```{r}
+majors <- read.table(
+  "C:/Users/nitya/OneDrive/Desktop/PROJECT/projectmajorssmaller.dat",
+  header = FALSE, sep = " "
+)
+names(majors)
+```
+
+## Loading names of the data in the NLSY97 as is to identify
+
+```{r}
+colnames(majors) <- c(
+  "personid",
+  "major2013_01", "major2013_02", "major2013_03", "major2013_04",
+  "major2015_01", "major2015_02", "major2015_03", "major2015_04",
+  "major2017_01", "major2017_02", "major2017_03", "major2017_04", "major2017_05",
+  "major2019_01", "major2019_02", "major2019_03", "major2019_04", "major2019_05",
+  "major2021_01",
+  "major2023_01", "major2023_02", "major2023_03"
+)
+```
+
+## Extracting data
+
+```{r}
+majors <- majors %>% mutate(across(everything(), as.numeric))
+
+majors_clean <- majors %>%
+  mutate(across(-personid, ~ case_when(
+    .x < 0  ~ NA_real_,
+    .x == 999 ~ NA_real_,
+    TRUE      ~ .x
+  )))
+
+majors_clean <- majors_clean %>%
+  mutate(
+    major_raw = coalesce(
+      major2013_01, major2013_02, major2013_03, major2013_04,
+      major2015_01, major2015_02, major2015_03, major2015_04,
+      major2017_01, major2017_02, major2017_03, major2017_04, major2017_05,
+      major2019_01, major2019_02, major2019_03, major2019_04, major2019_05,
+      major2021_01,
+      major2023_01, major2023_02, major2023_03
+    )
+  )
+
+majors_final <- majors_clean %>% select(personid, major_raw)
+
+sum(!is.na(majors_final$major_raw))
+table(majors_final$major_raw, useNA = "ifany")
+```
+
+## Mapping the numbers into field of study groups
+
+```{r}
+majors_final <- majors_final %>%
+  mutate(
+    field_group = case_when(
+      major_raw %in% c(11, 14, 15, 26, 27, 40, 41) ~ "STEM",
+      major_raw %in% c(52) ~ "Business",
+      major_raw %in% c(42, 43, 44, 45) ~ "Social Science/Public Service",
+      major_raw %in% c(16, 23, 38, 39, 50, 54, 5, 9) ~ "Humanities/Arts",
+      major_raw %in% c(13, 32, 33) ~ "Education",
+      major_raw %in% c(34, 51, 60) ~ "Health",
+      major_raw %in% c(10, 12, 46, 47, 48, 49) ~ "Trades/Applied",
+      major_raw %in% c(1, 3, 4, 19, 24, 25, 28, 29, 30, 31, 35, 36, 37, 53, 96) ~ "Other",
+      TRUE ~ NA_character_
+    )
+  )
+
+table(majors_final$field_group, useNA = "ifany")
+```
+
+## Merging the majors and field of study part into the nlsy agerestrict
+
+```{r}
+nlsy_agerestric   <- nlsy_agerestric   %>% mutate(personid = as.numeric(personid))
+majors_final <- majors_final %>% mutate(personid = as.numeric(personid))
+
+nlsy_final <- nlsy_agerestric %>% left_join(majors_final, by = "personid")
+
+nrow(nlsy_final)
+sum(!is.na(nlsy_final$field_group))
+```
+
+# CREATING A DEGREE VARIABLE
+
+```{r}
+degree_max <- nlsy_final %>%
+  mutate(highested3 = as.numeric(highested3)) %>%
+  filter(highested3 >= 0) %>%
+  group_by(personid) %>%
+  summarise(degree_raw = max(highested3, na.rm = TRUE)) %>%
+  ungroup()
+
+nlsy_final <- nlsy_final %>%
+  select(-any_of("degree_raw")) %>%
+  left_join(degree_max, by = "personid")
+
+nlsy_final <- nlsy_final %>%
+  mutate(degree_type = case_when(
+    degree_raw %in% c(0, 1) ~ "Less than HS / GED",
+    degree_raw == 2         ~ "High School Diploma",
+    degree_raw == 3         ~ "Associate",
+    degree_raw == 4         ~ "Bachelor's",
+    degree_raw == 5         ~ "Master's",
+    degree_raw == 6         ~ "PhD",
+    degree_raw == 7         ~ "Professional",
+    TRUE                    ~ NA_character_
+  ))
+
+table(nlsy_final$degree_type, useNA = "ifany")
+```
+
+# CREATING A POST SECONDARY EDUCATION DISTINCTION VARIABLE
+
+```{r}
+nlsy_dergee <- nlsy_final %>%
+  filter(
+    !is.na(field_group),
+    degree_type %in% c("Associate", "Bachelor's", "Master's", "PhD", "Professional")
+  )
+
+nrow(nlsy_dergee)
+length(unique(nlsy_dergee$personid))
+table(nlsy_dergee$field_group)
+table(nlsy_dergee$degree_type)
+```
+
+# FIG 1: MEAN LOG WAGE BY LEVEL OF DEGREE ACHIEVED
+
+```{r}
+deg_means <- nlsy_final %>%
+  filter(!is.na(degree_type)) %>%
+  group_by(degree_type) %>%
+  summarise(mean_lnwage = mean(lnwage, na.rm = TRUE), n = n()) %>%
+  mutate(degree_type = factor(degree_type,
+    levels = c("Less than HS / GED", "High School Diploma", "Associate",
+               "Bachelor's", "Master's", "PhD", "Professional")))
+
+fig1 <- ggplot(deg_means, aes(x = degree_type, y = mean_lnwage, fill = degree_type)) +
+  geom_col(width = 0.6, show.legend = FALSE) +
+  scale_fill_brewer(palette = "Blues") +
+  xlab("Highest degree earned") +
+  ylab("Mean log hourly wage") +
+  ggtitle("Figure 1: Mean Log Wage by Degree Level (base)") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+
+print(fig1)
+```
+
+# FIG 2: MEAN LOG WAGE BY TYPE OF STUDY
+
+```{r}
+field_means <- nlsy_dergee %>%
+  group_by(field_group) %>%
+  summarise(mean_lnwage = mean(lnwage, na.rm = TRUE), n = n()) %>%
+  arrange(mean_lnwage)
+
+fig2 <- ggplot(field_means,
+               aes(x = mean_lnwage,
+                   y = fct_reorder(field_group, mean_lnwage))) +
+  geom_point(color = "#3366FF", size = 3) +
+  geom_segment(aes(xend = min(mean_lnwage) - 0.02, yend = field_group),
+               color = "#3366FF", linewidth = 0.4) +
+  xlab("Mean log hourly wage") +
+  ylab("") +
+  ggtitle("Figure 2: Mean Log Wage by Field of Study (base)") +
+  theme_bw() +
+  theme(panel.grid.major.y = element_blank())
+
+print(fig2)
+```
+
+# REGRESSION 3: WAGE BY LEVEL OF DEGREE ACHIEVED
+
+```{r}
+nlsy_final$degree_type <- relevel(factor(nlsy_final$degree_type), ref = "High School Diploma")
+
+reg3 <- lm(
+  lnwage ~ degree_type + age + agesq + agecu + union + tenure + female + as.factor(year),
+  data = nlsy_final
+)
+
+summary(reg3)
+reg3a <- coeftest(reg3, vcov = vcovCL, type = "HC0", cluster = ~personid)
+
+```
+
+# REGRESSION 4: WAGE BY LEVEL OF DEGREE ACHIEVED WITH ASVAB AS AN ABILITY CONTROL
+
+```{r}
+reg4 <- lm(
+  lnwage ~ degree_type + asvab + age + agesq + agecu + union + tenure + female + as.factor(year),
+  data = nlsy_final
+)
+
+reg4a <- coeftest(reg4, vcov = vcovCL, type = "HC0", cluster = ~personid)
+
+summary(reg4)
+```
+
+## Table: Degrees with and without ASVAB
+
+```{r}
+export_summs(
+  reg3a, reg4a,
+  model.names = c("Degree (no ASVAB)", "Degree + ASVAB"),
+  digits = 4,
+  coefs = c("degree_typeAssociate", "degree_typeBachelor's",
+            "degree_typeMaster's", "degree_typePhD",
+            "degree_typeProfessional", "degree_typeLess than HS / GED",
+            "asvab", "age", "agesq", "agecu", "union", "tenure", "female")
+)
+```
+
+# REGRESSION 5: WAGES BY FIELD OF STUDY
+
+```{r}
+nlsy_dergee$field_group <- relevel(factor(nlsy_dergee$field_group),
+                                 ref = "Social Science/Public Service")
+
+reg5 <- lm(
+  lnwage ~ field_group + age + agesq + agecu + union + tenure + female + as.factor(year),
+  data = nlsy_dergee
+)
+
+summary(reg5)
+
+reg5a <- coeftest(reg5, vcov = vcovCL, type = "HC0", cluster = ~personid)
+```
+
+# REGRESSION 6: WAGES BY FIELD OF STUDY + DEGREE ACHIEVED
+
+```{r}
+nlsy_dergee$degree_type <- relevel(factor(nlsy_dergee$degree_type), ref = "Bachelor's")
+
+reg6 <- lm(
+  lnwage ~ field_group + degree_type + age + agesq + agecu + union + tenure + female + as.factor(year),
+  data = nlsy_dergee
+)
+
+summary(reg6)
+
+reg6a <- coeftest(reg6, vcov = vcovCL, type = "HC0", cluster = ~personid)
+```
+
+## Table: FIELD OF STUDY WITH AND WITHOUT DEGREE AS A CONTROL
+
+```{r}
+export_summs(
+  reg5a, reg6a,
+  model.names = c("Field only", "Field + Degree"),
+  digits = 4,
+  coefs = c("field_groupSTEM", "field_groupBusiness",
+            "field_groupHealth", "field_groupHumanities/Arts",
+            "field_groupEducation", "field_groupTrades/Applied", "field_groupOther",
+            "degree_typeAssociate", "degree_typeMaster's",
+            "degree_typePhD", "degree_typeProfessional",
+            "union", "tenure", "female")
+)
+```
+
+# REGRESSION 7: WITH ASVAB AS AN ABILITY CONTROL
+
+```{r}
+reg7 <- lm(
+  lnwage ~ field_group + degree_type + asvab + age + agesq + agecu + union + tenure + female + as.factor(year),
+  data = nlsy_dergee
+)
+
+summary(reg7)
+
+reg7a <- coeftest(reg7, vcov = vcovCL, type = "HC0", cluster = ~personid)
+```
+
+## TABLE: FIELD AND DEGREES BEOFRE AND AFTER ADDING ASVAB AS A CONTROL
+
+```{r}
+export_summs(
+  reg6a, reg7a,
+  model.names = c("Field + Degree (no ASVAB)", "Field + Degree + ASVAB"),
+  digits = 4,
+  coefs = c("field_groupSTEM", "field_groupBusiness",
+            "field_groupHealth", "field_groupHumanities/Arts",
+            "field_groupEducation", "field_groupTrades/Applied", "field_groupOther",
+            "asvab", "union", "tenure", "female")
+)
+```
+
+# Figure 4: Coefficient plot — field premiums with 95% CI
+
+```{r}
+field_coefs <- tidy(reg6a) %>%
+  filter(grepl("field_group", term)) %>%
+  mutate(
+    field = gsub("field_group", "", term),
+    lower = estimate - 1.96 * std.error,
+    upper = estimate + 1.96 * std.error
+  )
+
+fig4 <- ggplot(field_coefs,
+               aes(x = estimate,
+                   y = fct_reorder(field, estimate),
+                   color = estimate > 0)) +
+  geom_point(size = 3) +
+  geom_errorbarh(aes(xmin = lower, xmax = upper), height = 0.3) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey50") +
+  scale_color_manual(values = c("TRUE" = "#3366FF", "FALSE" = "#CC3300"),
+                     guide = "none") +
+  xlab("Coefficient (ref: Social Science/Public Service)") +
+  ylab("") +
+  ggtitle("Figure 4: Field of Study Wage Premiums\n(95% CI, conditional on degree, age, controls)") +
+  theme_bw()
+
+print(fig4)
+```
+
+# Figure 5: STEM and Health premium — with vs. without ASVAB
+
+```{r}
+stems <- data.frame(
+  field = rep(c("STEM", "Health"), 2),
+  model = c("No ASVAB", "No ASVAB", "With ASVAB", "With ASVAB"),
+  est   = c(coef(reg6)["field_groupSTEM"],
+            coef(reg6)["field_groupHealth"],
+            coef(reg7)["field_groupSTEM"],
+            coef(reg7)["field_groupHealth"]),
+  se    = c(sqrt(vcov(reg6)["field_groupSTEM",  "field_groupSTEM"]),
+            sqrt(vcov(reg6)["field_groupHealth", "field_groupHealth"]),
+            sqrt(vcov(reg7)["field_groupSTEM",  "field_groupSTEM"]),
+            sqrt(vcov(reg7)["field_groupHealth", "field_groupHealth"]))
+)
+
+fig5 <- ggplot(stems, aes(x = model, y = est, fill = model)) +
+  geom_col(width = 0.5, show.legend = FALSE) +
+  geom_errorbar(aes(ymin = est - 1.96 * se, ymax = est + 1.96 * se), width = 0.15) +
+  facet_wrap(~field) +
+  scale_fill_manual(values = c("No ASVAB" = "#CC3300", "With ASVAB" = "#3366FF")) +
+  xlab("") +
+  ylab("Field premium (log points)") +
+  ggtitle("Figure 5: STEM and Health Premiums Before and After Controlling for ASVAB") +
+  theme_bw()
+
+print(fig5)
+
+```
